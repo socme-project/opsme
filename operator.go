@@ -36,3 +36,15 @@ func (o *Operator) RemoveMachine(machineID string) {
 		}
 	}
 }
+
+func (o *Operator) SendCommandToMachine(machineID, command string) (string, error) {
+	machine := o.GetMachineByID(machineID)
+	if machine == nil {
+		return "", nil // CHANGEME to error.
+	}
+	return machine.sendCommand(command)
+}
+
+/* func (o *Operator) GetMachineStatus(machineID string) (string, error) {
+	return o.SendCommandToMachine(machineID, "status")	
+}*/
