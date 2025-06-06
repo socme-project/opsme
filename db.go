@@ -3,6 +3,7 @@ package opsme
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -20,7 +21,12 @@ func GetArtemisMachines() ([]ArtemisRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to PocketBase: %w", err)
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("WARNING: Failed to close HTTP response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(

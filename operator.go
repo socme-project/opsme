@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -81,7 +82,7 @@ func (o *Operator) AddMachine(machine *Machine) {
 func (o *Operator) RemoveMachine(machineID string) {
 	for i, machine := range o.Machines {
 		if machine.ID == machineID {
-			o.Machines = append(o.Machines[:i], o.Machines[i+1:]...)
+			o.Machines = slices.Delete(o.Machines, i, i+1)
 			return
 		}
 	}

@@ -27,16 +27,14 @@ func (m *Machine) connect(signer ssh.Signer) (*ssh.Client, error) {
 			ssh.PublicKeys(signer),
 		},
 		Timeout: 5 * time.Second,
-		HostKeyCallback: ssh.NewCallback(
-			func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-				log.Printf(
-					"INFO: SSH Host Key Callback for %s. Fingerprint: %s",
-					hostname,
-					ssh.FingerprintSHA256(key),
-				)
-				return nil
-			},
-		),
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			log.Printf(
+				"INFO: SSH Host Key Callback for %s. Fingerprint: %s",
+				hostname,
+				ssh.FingerprintSHA256(key),
+			)
+			return nil
+		},
 	}
 
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", m.SSHLogin.IP), config)
@@ -51,7 +49,12 @@ func (m *Machine) sendCommand(client *ssh.Client, command string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("failed to create SSH session for %s: %w", m.Name, err)
 	}
-	defer session.Close()
+
+	defer func() {
+		if err := session.Close(); err != nil {
+			log.Printf("WARNING: Failed to close SSH session for %s: %v", m.Name, err)
+		}
+	}()
 
 	output, err := session.CombinedOutput(command)
 	if err != nil {
@@ -67,4 +70,3 @@ func (m *Machine) sendCommand(client *ssh.Client, command string) (string, error
 
 	return string(output), nil
 }
-
