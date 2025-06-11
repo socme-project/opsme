@@ -1,72 +1,43 @@
 package opsme
 
-import (
-	"fmt"
-	"log"
-	"net"
-	"time"
+type AuthType int
 
-	"golang.org/x/crypto/ssh"
+const (
+	AuthTypePassword AuthType = iota
+	AuthTypeSshKey
 )
 
-type SSHLogin struct {
-	IP       string `json:"ip"`
-	Username string `json:"username"`
+type Auth struct {
+	AuthType AuthType
+	Password string
+	SshKey   string
 }
 
 type Machine struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	SSHLogin SSHLogin
+	Name     string
+	Username string
+	Host     string
+	Port     int
+	Auth     Auth
 }
 
-func (m *Machine) connect(signer ssh.Signer) (*ssh.Client, error) {
-	config := &ssh.ClientConfig{
-		User: m.SSHLogin.Username,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		Timeout: 5 * time.Second,
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			log.Printf(
-				"INFO: SSH Host Key Callback for %s. Fingerprint: %s",
-				hostname,
-				ssh.FingerprintSHA256(key),
-			)
-			return nil
-		},
+func (m *Machine) WithPasswordAuth(password string) *Machine {
+	m.Auth = Auth{
+		AuthType: AuthTypePassword,
+		Password: password,
 	}
-
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", m.SSHLogin.IP), config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial SSH to %s (%s): %w", m.Name, m.SSHLogin.IP, err)
-	}
-	return client, nil
+	return m
 }
 
-func (m *Machine) sendCommand(client *ssh.Client, command string) (string, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("failed to create SSH session for %s: %w", m.Name, err)
+func (m *Machine) WithSshKeyAuth(sshKey string) *Machine {
+	m.Auth = Auth{
+		AuthType: AuthTypeSshKey,
+		SshKey:   sshKey,
 	}
-
-	defer func() {
-		if err := session.Close(); err != nil {
-			log.Printf("WARNING: Failed to close SSH session for %s: %v", m.Name, err)
-		}
-	}()
-
-	output, err := session.CombinedOutput(command)
-	if err != nil {
-		return string(
-				output,
-			), fmt.Errorf(
-				"failed to execute command '%s' on %s: %w",
-				command,
-				m.Name,
-				err,
-			)
-	}
-
-	return string(output), nil
+	return m
 }
+
+//func (m Machine) Run(command string) (Output, error) {
+	// Run the command without taking care of auth since auth will work like this : NetMachine.Run(command).WithAuth(m.Auth)
+
+
