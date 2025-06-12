@@ -2,6 +2,7 @@ package opsme
 
 import (
 	"errors"
+	"sync"
 )
 
 type Output struct {
@@ -52,13 +53,27 @@ func (op *Operator) NewMachine(
 }
 
 func (op Operator) Run(command string) (outputs []Output, errs []error) {
-	outputs = make([]Output, 0, len(op.Machines))
-	errs = make([]error, 0, len(op.Machines))
+	numMachines := len(op.Machines)
+	outputs = make([]Output, numMachines)
+	errs = make([]error, numMachines)
 
-	for _, machine := range op.Machines {
-		output, err := machine.Run(command)
-		outputs = append(outputs, output)
-		errs = append(errs, err)
+	var wg sync.WaitGroup
+
+	for i, machine := range op.Machines {
+		wg.Add(1)
+
+		mCopy := machine
+
+		go func(index int, m Machine) {
+			defer wg.Done()
+
+			output, err := m.Run(command)
+			outputs[index] = output
+			errs[index] = err
+		}(i, mCopy)
 	}
+
+	wg.Wait()
+
 	return outputs, errs
 }
