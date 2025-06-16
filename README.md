@@ -21,7 +21,6 @@ import "github.com/socme-project/opsme"
 You can then create a new instance of OPSme and use it to execute commands on multiple machines. Here is a simple example:
 
 ```go
-
 package main
 
 import (
@@ -74,7 +73,7 @@ func main() {
 		log.Printf("Failed to create machine2: %v", err)
 	} else {
 		fmt.Printf("Machine %s created. Setting SSH key auth...\n", m2.Name)
-		authErr := m2.WithSshKeyAuth(privateKey)
+		authErr := m2.WithSSHKeyAuth(privateKey)
 		if authErr != nil {
 			log.Printf("Failed to authenticate machine %s: %v\n", m2.Name, authErr)
 		} else {

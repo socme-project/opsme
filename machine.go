@@ -17,13 +17,13 @@ type AuthType int
 
 const (
 	AuthTypePassword AuthType = iota
-	AuthTypeSshKey
+	AuthTypeSSHKey
 )
 
 type Auth struct {
 	AuthType AuthType
 	Password string
-	SshKey   []byte
+	SSHKey   []byte
 }
 
 type Machine struct {
@@ -41,7 +41,7 @@ func (m *Machine) WithPasswordAuth(password string) error {
 		AuthType: AuthTypePassword,
 		Password: password,
 	}
-	client, err := m.newSshClient()
+	client, err := m.newSSHClient()
 	if err != nil {
 		return fmt.Errorf("failed to authenticate machine '%s' with password: %w", m.Name, err)
 	}
@@ -52,13 +52,13 @@ func (m *Machine) WithPasswordAuth(password string) error {
 	return nil
 }
 
-func (m *Machine) WithSshKeyAuth(sshKey []byte) error {
+func (m *Machine) WithSSHKeyAuth(sshKey []byte) error {
 	m.auth = Auth{
-		AuthType: AuthTypeSshKey,
-		SshKey:   sshKey,
+		AuthType: AuthTypeSSHKey,
+		SSHKey:   sshKey,
 	}
 	// Verify authentication immediately upon setting
-	client, err := m.newSshClient() // Create a client to test auth, then it's closed
+	client, err := m.newSSHClient() // Create a client to test auth, then it's closed
 	if err != nil {
 		return fmt.Errorf("failed to authenticate machine '%s' with SSH key: %w", m.Name, err)
 	}
@@ -68,7 +68,7 @@ func (m *Machine) WithSshKeyAuth(sshKey []byte) error {
 	return nil
 }
 
-func (m Machine) newSshClient() (*ssh.Client, error) {
+func (m Machine) newSSHClient() (*ssh.Client, error) {
 	var hostKeyCallback ssh.HostKeyCallback
 
 	lookupPath := m.KnownHostsPath
@@ -149,8 +149,8 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 				},
 			),
 		)
-	case AuthTypeSshKey:
-		signer, err := ssh.ParsePrivateKey(m.auth.SshKey)
+	case AuthTypeSSHKey:
+		signer, err := ssh.ParsePrivateKey(m.auth.SSHKey)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"machine '%s': failed to parse SSH key: %w",
@@ -179,7 +179,7 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 }
 
 func (m Machine) Run(command string) (Output, error) {
-	if m.auth.AuthType == 0 && m.auth.Password == "" && len(m.auth.SshKey) == 0 {
+	if m.auth.AuthType == 0 && m.auth.Password == "" && len(m.auth.SSHKey) == 0 {
 		return Output{
 				MachineName: m.Name,
 			}, fmt.Errorf(
@@ -188,13 +188,15 @@ func (m Machine) Run(command string) (Output, error) {
 			)
 	}
 
-	client, err := m.newSshClient()
+	client, err := m.newSSHClient()
 	if err != nil {
 		return Output{
 			MachineName: m.Name,
 		}, err
 	}
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	session, err := client.NewSession()
 	if err != nil {
