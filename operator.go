@@ -2,6 +2,9 @@ package opsme
 
 import (
 	"errors"
+	"fmt"
+	"os/user"
+	"path/filepath"
 	"sync"
 )
 
@@ -11,20 +14,28 @@ type Output struct {
 }
 
 type Operator struct {
-	Machines []Machine
+	Machines        []Machine
+	AddToKnownHosts bool
+	KnownHostsPath  string
 }
 
-func New() Operator {
+func New(addToKnownHosts bool) Operator {
+	var defaultKnownHostsPath string
+	currentUser, _ := user.Current()
+	defaultKnownHostsPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
+
 	op := Operator{
-		Machines: []Machine{},
+		Machines:        []Machine{},
+		AddToKnownHosts: addToKnownHosts,
+		KnownHostsPath:  defaultKnownHostsPath,
 	}
 	return op
 }
 
 func (op *Operator) NewMachine(
-	machineName, username, hostkey, host string,
+	machineName, username, host string,
 	port int,
-	auth Auth, // Now Auth is passed directly here
+	auth Auth,
 ) (Machine, error) {
 	for _, m := range op.Machines {
 		if m.Name == machineName {
@@ -40,13 +51,27 @@ func (op *Operator) NewMachine(
 	}
 
 	machine := Machine{
-		Name:     machineName,
-		Username: username,
-		HostKey:  hostkey,
-		Host:     host,
-		Port:     port,
-		Auth:     auth,
+		Name:            machineName,
+		Username:        username,
+		Host:            host,
+		Port:            port,
+		Auth:            auth,
+		KnownHostsPath:  op.KnownHostsPath,
+		AddToKnownHosts: op.AddToKnownHosts,
 	}
+
+	client, err := machine.newSSHClient()
+	if err != nil {
+		return Machine{}, fmt.Errorf(
+			"initial connection and authentication failed for machine '%s': %w",
+			machineName,
+			err,
+		)
+	}
+
+	defer func() {
+		_ = client.Close()
+	}()
 
 	op.Machines = append(op.Machines, machine)
 	return machine, nil
