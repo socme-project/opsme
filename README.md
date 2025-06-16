@@ -21,107 +21,96 @@ import "github.com/socme-project/opsme"
 You can then create a new instance of OPSme and use it to execute commands on multiple machines. Here is a simple example:
 
 ```go
+
 package main
 
 import (
- "fmt"
- "log"
- "os/user"
- "path/filepath"
- "strings"
+	"fmt"
+	"log"
+	"strings"
 
- "github.com/socme-project/opsme"
+	"github.com/socme-project/opsme"
 )
 
 func main() {
- operator := opsme.New(
-  true,
- ) // true here means that the HostKey will be automatically added to the known_hosts file
+	operator := opsme.New(true) // true means HostKey will be automatically added if missing
 
- m1, err := operator.NewMachine(
-  "machineName",
-  "user",
-  "192.168.1.2",
-  22,
-  opsme.Auth{AuthType: opsme.AuthTypePassword, Password: "test1234"},
- )
- if err != nil {
-  log.Printf("Error creating machine: %s", err.Error())
- } else {
-  fmt.Println("The following machine was created successfully:", m1.Name)
-  result, runErr := m1.Run("pwd")
-  fmt.Println("Running 'pwd' on machine:", m1.Name)
-  if runErr != nil {
-   log.Printf("Error running command on %v: %v", m1.Name, runErr)
-  } else {
-   fmt.Println("Output from 'machineName' :", strings.TrimSpace(result.Output))
-  }
- }
+	m1, err := operator.NewMachine(
+		"machine1",
+		"user",
+		"192.168.1.2",
+		22,
+	)
+	if err != nil {
+		log.Printf("Failed to create machine1: %v", err)
+	} else {
+		fmt.Printf("Machine %s created. Setting password auth...\n", m1.Name)
+		authErr := m1.WithPasswordAuth("test1234")
+		if authErr != nil {
+			log.Printf("Failed to authenticate machine %s: %v\n", m1.Name, authErr)
+		} else {
+			fmt.Printf("Machine %s authenticated. Running 'pwd'...\n", m1.Name)
+			result, runErr := m1.Run("pwd")
+			if runErr != nil {
+				log.Printf("Error 'pwd' on %s: %v\n", m1.Name, runErr)
+			} else {
+				fmt.Printf("Output from %s ('pwd'): %s\n", m1.Name, strings.TrimSpace(result.Output))
+			}
+		}
+	}
 
- currentUser, _ := user.Current()
- privateKeyPath := filepath.Join(currentUser.HomeDir, ".ssh", "id_ed25519")
- privateKey, err := opsme.GetKeyFromFile(privateKeyPath)
- if err != nil {
-  log.Printf("Error reading SSH key from file: %s", err.Error())
- } else {
-  m2, err := operator.NewMachine(
-   "machineName2",
-   "dilounix",
-   "hyrule",
-   22,
-   opsme.Auth{
-    AuthType: opsme.AuthTypeSshKey,
-    SshKey:   privateKey,
-   },
-  )
+	privateKey := []byte(`-----BEGIN OPENSSH PRIVATE KEY-----
+	.
+	.
+	.
+	.
+	.
+	.
+	.
+	-----END OPENSSH PRIVATE KEY-----`)
 
-  if err != nil {
-   log.Printf("Error creating machine: %s", err.Error())
-  } else {
-   fmt.Println("The following machine was created successfully:", m2.Name)
-   result, runErr := m2.Run("pwd")
-   fmt.Println("Running 'pwd' on machine:", m2.Name)
-   if runErr != nil {
-    log.Printf("Error running command on %v: %v", m2.Name, runErr)
-   } else {
-    fmt.Println("Output from 'machineName2':", strings.TrimSpace(result.Output))
-   }
-  }
- }
+	m2, err := operator.NewMachine("machine2", "dilounix", "hyrule", 22)
+	if err != nil {
+		log.Printf("Failed to create machine2: %v", err)
+	} else {
+		fmt.Printf("Machine %s created. Setting SSH key auth...\n", m2.Name)
+		authErr := m2.WithSshKeyAuth(privateKey)
+		if authErr != nil {
+			log.Printf("Failed to authenticate machine %s: %v\n", m2.Name, authErr)
+		} else {
+			fmt.Printf("Machine %s authenticated. Running 'pwd'...\n", m2.Name)
+			result, runErr := m2.Run("pwd")
+			if runErr != nil {
+				log.Printf("Error 'pwd' on %s: %v\n", m2.Name, runErr)
+			} else {
+				fmt.Printf("Output from %s ('pwd'): %s\n", m2.Name, strings.TrimSpace(result.Output))
+			}
+		}
+	}
 
- results, runErrors := operator.Run("id")
+	fmt.Println("\nRunning 'id' on all machines...")
+	results, runErrors := operator.Run("id")
+	for i, result := range results {
+		if runErrors[i] != nil {
+			fmt.Printf("Error on machine %s ('id'): %v\n", result.MachineName, runErrors[i])
+		} else {
+			fmt.Printf("Output from %s ('id'): %s\n", result.MachineName, strings.TrimSpace(result.Output))
+		}
+	}
 
- for i := range results {
-  machineName := results[i].MachineName
-  if runErrors[i] != nil {
-   fmt.Printf("Error on machine %s: %v\n", machineName, runErrors[i])
-  } else {
-   fmt.Printf("Machine name: %s\n", machineName)
-   fmt.Printf("Output: %s\n", strings.TrimSpace(results[i].Output))
-  }
- }
+	fmt.Println("\nRunning 'uname -a' on first machine...")
+	if len(operator.Machines) > 0 {
+		firstMachine := operator.Machines[0]
+		result, runErr := firstMachine.Run("uname -a")
+		if runErr != nil {
+			log.Printf("Error 'uname -a' on %s: %v\n", firstMachine.Name, runErr)
+		} else {
+			fmt.Printf("Output from %s ('uname -a'): %s\n", firstMachine.Name, strings.TrimSpace(result.Output))
+		}
+	} else {
+		fmt.Println("No machines available for 'uname -a'.")
+	}
 
- if len(operator.Machines) > 0 {
-  firstMachine := operator.Machines[0]
-  result, runErr := firstMachine.Run("uname -a")
-  fmt.Printf("Running 'uname -a' on machine: %s\n", firstMachine.Name)
-  if runErr != nil {
-   log.Printf("Error running command on %s: %v", firstMachine.Name, runErr)
-  } else {
-   fmt.Printf("Machine name: %s\n", result.MachineName)
-   fmt.Printf("Output: %s\n", strings.TrimSpace(result.Output))
-  }
- } else {
-  fmt.Println("No machines were successfully added to the operator to run 'uname -a' on.")
- }
-
- numMachines := len(operator.Machines)
- fmt.Printf("Total number of machines: %d\n", numMachines)
+	fmt.Printf("\nTotal machines managed: %d\n", len(operator.Machines))
 }
-```
 
-You can also change the authentication method for a machine after it has been created:
-
-```go
-m1.WithPasswordAuth("newpassword")
-```
