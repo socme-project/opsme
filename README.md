@@ -7,7 +7,7 @@ OPSme is a golang library that provides a simple way to manage multiple machines
 To install OPSme, you can use the following command:
 
 ```bash
-go get github.com/opsme/opsme
+go get github.com/socme-project/opsme
 ```
 
 ## Usage
@@ -15,7 +15,7 @@ go get github.com/opsme/opsme
 To use OPSme, you need to import the package in your Go code:
 
 ```go
-import "github.com/opsme/opsme"
+import "github.com/socme-project/opsme"
 ```
 
 You can then create a new instance of OPSme and use it to execute commands on multiple machines. Here is a simple example:
@@ -24,43 +24,95 @@ You can then create a new instance of OPSme and use it to execute commands on mu
 package main
 
 import (
-  "fmt"
-  "github.com/opsme/opsme"
+ "fmt"
+
+ "github.com/socme-project/opsme"
 )
 
 func main() {
-  operator := opsme.New()
+ operator := opsme.New()
 
-  m1 := operator.NewMachine("machineName", "user", "192.168.1.2")
-  m1.WithPasswordAuth("test1234")
-
-  m2, err := operator.NewMachine("machineName2", "user", "192.168.1.3").WithSshKeyAuth("-----BEGIN OPENSSH PRIVATE KEY-----\n...")
-  if err != nil {
-   panic(err)
-  }
-
- results, err := operator.Run("id")
+ m1, err := operator.NewMachine(
+  "machineName",
+  "user",
+  "", // HostKey is automatically taken from the known_hosts file, however, you can specify it manually if needed
+  "192.168.1.2",
+  22,
+  opsme.Auth{AuthType: opsme.AuthTypePassword, Password: "test1234"},
+ )
  if err != nil {
-  panic(err)
+  fmt.Println("Error creating machine:", err)
+ } else {
+  fmt.Println("Machine created successfully:", m1.Name)
  }
 
- for _, result := range results {
-  fmt.Println("Machine name:", result.MachineName)
+ result, err := m1.Run("pwd")
+ if err != nil {
+  fmt.Println("Error running command on machine:", err)
+ } else {
   fmt.Println("Output:", result.Output)
  }
 
- result, err := m2.Run("uname -a")
+ m2, err := operator.NewMachine(
+  "siuu",
+  "dilounix",
+  "", // HostKey is automatically taken from the known_hosts file, however, you can specify it manually if needed
+  "192.168.1.3",
+  22,
+  opsme.Auth{
+   AuthType: opsme.AuthTypeSshKey,
+   SshKey: `-----BEGIN OPENSSH PRIVATE KEY-----
+   .
+   .
+   .
+   .
+   .
+   .
+   -----END OPENSSH PRIVATE KEY-----
+   `,
+  },
+ )
  if err != nil {
-  panic(err)
+  fmt.Println("Error creating machine:", err)
+ } else {
+  fmt.Println("Machine created successfully:", m2.Name)
  }
- fmt.Println("Machine name:", result.MachineName)
- fmt.Println("Output:", result.Output)
 
- result, err := operator.Machines[0].Run("uname -a")
+ result, err = m2.Run("pwd")
  if err != nil {
-  panic(err)
+  fmt.Println("Error running command on machine:", err)
+ } else {
+  fmt.Println("Output:", result.Output)
  }
- fmt.Println("Machine name:", result.MachineName)
- fmt.Println("Output:", result.Output)
+
+ results, errors := operator.Run("id")
+ if len(errors) > 0 {
+  for i, individualErr := range errors {
+   if individualErr != nil {
+    fmt.Printf("Error on machine %s: %v\n", operator.Machines[i].Name, individualErr)
+   } else {
+    fmt.Println("Machine name:", operator.Machines[i].Name)
+    fmt.Println("Output:", results[i].Output)
+   }
+  }
+ } else {
+  for _, result := range results {
+   fmt.Println("Machine name:", result.MachineName)
+   fmt.Println("Output:", result.Output)
+  }
+ }
+
+ result, err = operator.Machines[0].Run("uname -a")
+ if err != nil {
+  fmt.Println("Error running command on machine:", err)
+ } else {
+  fmt.Println("Output:", result.Output)
+ }
 }
+```
+
+You can also change the authentication method for a machine after it has been created:
+
+```go
+m1.WithPasswordAuth("newpassword")
 ```
