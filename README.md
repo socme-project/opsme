@@ -21,93 +21,104 @@ import "github.com/socme-project/opsme"
 You can then create a new instance of OPSme and use it to execute commands on multiple machines. Here is a simple example:
 
 ```go
+
 package main
 
 import (
- "fmt"
+	"fmt"
+	"log"
+	"strings"
 
- "github.com/socme-project/opsme"
+	"github.com/socme-project/opsme"
 )
 
 func main() {
- operator := opsme.New()
+	operator := opsme.New(
+		true,
+	) // true here means that the HostKey will be automatically added to the known_hosts file
 
- m1, err := operator.NewMachine(
-  "machineName",
-  "user",
-  "", // HostKey is automatically taken from the known_hosts file, however, you can specify it manually if needed
-  "192.168.1.2",
-  22,
-  opsme.Auth{AuthType: opsme.AuthTypePassword, Password: "test1234"},
- )
- if err != nil {
-  fmt.Println("Error creating machine:", err)
- } else {
-  fmt.Println("Machine created successfully:", m1.Name)
- }
+	m1, err := operator.NewMachine(
+		"machineName",
+		"user",
+		"192.168.1.2",
+		22,
+		opsme.Auth{AuthType: opsme.AuthTypePassword, Password: "test1234"},
+	)
+	if err != nil {
+		log.Printf("%v", err)
+	} else {
+		fmt.Println("The following machine was created successfully:", m1.Name)
+		result, runErr := m1.Run("pwd")
+		fmt.Println("Running 'pwd' on machine:", m1.Name)
+		if runErr != nil {
+			log.Printf("Error running command on %v: %v", m1.Name, runErr)
+		} else {
+			fmt.Println("Output from 'machineName' :", strings.TrimSpace(result.Output))
+		}
+	}
 
- result, err := m1.Run("pwd")
- if err != nil {
-  fmt.Println("Error running command on machine:", err)
- } else {
-  fmt.Println("Output:", result.Output)
- }
+	privateKey := `-----BEGIN OPENSSH PRIVATE KEY-----
+	.
+	.
+	.
+	.
+	.
+	.
+	.
+	-----END OPENSSH PRIVATE KEY-----`
 
- m2, err := operator.NewMachine(
-  "siuu",
-  "dilounix",
-  "", // HostKey is automatically taken from the known_hosts file, however, you can specify it manually if needed
-  "192.168.1.3",
-  22,
-  opsme.Auth{
-   AuthType: opsme.AuthTypeSshKey,
-   SshKey: `-----BEGIN OPENSSH PRIVATE KEY-----
-   .
-   .
-   .
-   .
-   .
-   .
-   -----END OPENSSH PRIVATE KEY-----
-   `,
-  },
- )
- if err != nil {
-  fmt.Println("Error creating machine:", err)
- } else {
-  fmt.Println("Machine created successfully:", m2.Name)
- }
+	m2, err := operator.NewMachine(
+		"machineName2",
+		"dilounix",
+		"hyrule",
+		22,
+		opsme.Auth{
+			AuthType: opsme.AuthTypeSshKey,
+			SshKey:   privateKey,
+		},
+	)
 
- result, err = m2.Run("pwd")
- if err != nil {
-  fmt.Println("Error running command on machine:", err)
- } else {
-  fmt.Println("Output:", result.Output)
- }
+	if err != nil {
+		log.Printf("%v", err)
+	} else {
+		fmt.Println("The following machine was created successfully:", m2.Name)
+		result, runErr := m2.Run("pwd")
+		fmt.Println("Running 'pwd' on machine:", m2.Name)
+		if runErr != nil {
+			log.Printf("Error running command on %v: %v", m2.Name, runErr)
+		} else {
+			fmt.Println("Output from 'machineName2':", strings.TrimSpace(result.Output))
+		}
+	}
 
- results, errors := operator.Run("id")
- if len(errors) > 0 {
-  for i, individualErr := range errors {
-   if individualErr != nil {
-    fmt.Printf("Error on machine %s: %v\n", operator.Machines[i].Name, individualErr)
-   } else {
-    fmt.Println("Machine name:", operator.Machines[i].Name)
-    fmt.Println("Output:", results[i].Output)
-   }
-  }
- } else {
-  for _, result := range results {
-   fmt.Println("Machine name:", result.MachineName)
-   fmt.Println("Output:", result.Output)
-  }
- }
+	results, runErrors := operator.Run("id")
 
- result, err = operator.Machines[0].Run("uname -a")
- if err != nil {
-  fmt.Println("Error running command on machine:", err)
- } else {
-  fmt.Println("Output:", result.Output)
- }
+	for i := range results {
+		machineName := results[i].MachineName
+		if runErrors[i] != nil {
+			fmt.Printf("Error on machine %s: %v\n", machineName, runErrors[i])
+		} else {
+			fmt.Printf("Machine name: %s\n", machineName)
+			fmt.Printf("Output: %s\n", strings.TrimSpace(results[i].Output))
+		}
+	}
+
+	if len(operator.Machines) > 0 {
+		firstMachine := operator.Machines[0]
+		result, runErr := firstMachine.Run("uname -a")
+		fmt.Printf("Running 'uname -a' on machine: %s\n", firstMachine.Name)
+		if runErr != nil {
+			log.Printf("Error running command on %s: %v", firstMachine.Name, runErr)
+		} else {
+			fmt.Printf("Machine name: %s\n", result.MachineName)
+			fmt.Printf("Output: %s\n", strings.TrimSpace(result.Output))
+		}
+	} else {
+		fmt.Println("No machines were successfully added to the operator to run 'uname -a' on.")
+	}
+
+	numMachines := len(operator.Machines)
+	fmt.Printf("Total number of machines: %d\n", numMachines)
 }
 ```
 
