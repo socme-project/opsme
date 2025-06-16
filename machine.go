@@ -82,7 +82,10 @@ func (m Machine) newSSHClient() (*ssh.Client, error) {
 						openErr,
 					)
 				}
-				defer f.Close()
+
+				defer func() {
+					_ = f.Close()
+				}()
 
 				hostEntry := knownhosts.Line([]string{hostname}, key)
 				if _, writeErr := f.WriteString(hostEntry + "\n"); writeErr != nil {
@@ -132,7 +135,7 @@ func (m Machine) newSSHClient() (*ssh.Client, error) {
 		signer, err := ssh.ParsePrivateKey([]byte(m.Auth.SshKey))
 		if err != nil {
 			return nil, fmt.Errorf(
-				"machine '%s': failed to parse SSH key: %w",
+				"machine '%s': failed to parse SSH key. %w",
 				m.Name,
 				err,
 			)
@@ -148,9 +151,8 @@ func (m Machine) newSSHClient() (*ssh.Client, error) {
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"machine '%s': failed to connect to %s: %w",
+			"machine '%s': failed to connect, error : %w",
 			m.Name,
-			addr,
 			err,
 		)
 	}

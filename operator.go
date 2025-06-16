@@ -63,8 +63,7 @@ func (op *Operator) NewMachine(
 	client, err := machine.newSSHClient()
 	if err != nil {
 		return Machine{}, fmt.Errorf(
-			"initial connection and authentication failed for machine '%s': %w",
-			machineName,
+			"initial connection and authentication failed for %w",
 			err,
 		)
 	}
