@@ -45,7 +45,7 @@ func (op *Operator) NewMachine(
 		HostKey:  hostkey,
 		Host:     host,
 		Port:     port,
-		Auth:     auth, // Auth is assigned directly from the parameter
+		Auth:     auth,
 	}
 
 	op.Machines = append(op.Machines, machine)

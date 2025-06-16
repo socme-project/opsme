@@ -1,13 +1,15 @@
 package opsme
 
 import (
-	"encoding/base64"
-	"fmt" // Import the log package
-	"net"
+	"fmt"
+	"os"
+	"os/user"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type AuthType int
@@ -24,12 +26,13 @@ type Auth struct {
 }
 
 type Machine struct {
-	Name     string
-	Username string
-	Host     string
-	Port     int
-	HostKey  string
-	Auth     Auth
+	Name           string
+	Username       string
+	Host           string
+	Port           int
+	HostKey        string
+	Auth           Auth
+	KnownHostsPath string
 }
 
 func (m *Machine) WithPasswordAuth(password string) {
@@ -46,32 +49,44 @@ func (m *Machine) WithSshKeyAuth(sshKey string) {
 	}
 }
 
-func keyString(k ssh.PublicKey) string {
-	return k.Type() + " " + base64.StdEncoding.EncodeToString(
-		k.Marshal(),
-	)
-}
-
-func trustedHostKeyCallback(trustedKey string) ssh.HostKeyCallback {
-	if trustedKey == "" {
-		return func(_ string, _ net.Addr, k ssh.PublicKey) error {
-			return nil
-		}
-	}
-
-	return func(_ string, _ net.Addr, k ssh.PublicKey) error {
-		ks := keyString(k)
-		if trustedKey != ks {
-			return fmt.Errorf("SSH-key verification: expected %q but got %q", trustedKey, ks)
-		}
-		return nil
-	}
-}
-
 func (m Machine) Run(command string) (Output, error) {
+	var hostKeyCallback ssh.HostKeyCallback
+	var err error
+
+	if m.HostKey != "" {
+		var parsedKey ssh.PublicKey
+		parsedKey, err = ssh.ParsePublicKey([]byte(m.HostKey))
+		if err != nil {
+			return Output{}, fmt.Errorf(
+				"machine '%s': invalid explicit HostKey provided: %w",
+				m.Name,
+				err,
+			)
+		}
+		hostKeyCallback = ssh.FixedHostKey(parsedKey)
+	} else {
+		lookupPath := m.KnownHostsPath
+		if lookupPath == "" {
+			currentUser, userErr := user.Current()
+			if userErr != nil {
+				return Output{}, fmt.Errorf("machine '%s': failed to get current user home directory for default known_hosts path: %w", m.Name, userErr)
+			}
+			lookupPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
+		}
+
+		if _, statErr := os.Stat(lookupPath); os.IsNotExist(statErr) {
+			return Output{}, fmt.Errorf("machine '%s': no explicit host key provided and known_hosts file (%s) not found. Host key enforcement requires a known key or a valid known_hosts file.", m.Name, lookupPath)
+		}
+
+		hostKeyCallback, err = knownhosts.New(lookupPath)
+		if err != nil {
+			return Output{}, fmt.Errorf("machine '%s': failed to load known_hosts file %s: %w", m.Name, lookupPath, err)
+		}
+	}
+
 	config := &ssh.ClientConfig{
 		User:            m.Username,
-		HostKeyCallback: trustedHostKeyCallback(m.HostKey),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 
@@ -87,7 +102,7 @@ func (m Machine) Run(command string) (Output, error) {
 					answers := make([]string, len(questions))
 					for i, q := range questions {
 						if (q == "Password:" || q == "password:" || q == fmt.Sprintf("%s@%s's password:", user, m.Host)) &&
-							echoprompts[i] == false {
+							!echoprompts[i] {
 							answers[i] = m.Auth.Password
 						} else {
 							return nil, fmt.Errorf("unsupported keyboard-interactive question: %s", q)
