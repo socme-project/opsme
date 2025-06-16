@@ -31,23 +31,41 @@ type Machine struct {
 	Username        string
 	Host            string
 	Port            int
-	Auth            Auth
+	auth            Auth
 	KnownHostsPath  string
 	AddToKnownHosts bool
 }
 
-func (m *Machine) WithPasswordAuth(password string) {
-	m.Auth = Auth{
+func (m *Machine) WithPasswordAuth(password string) error {
+	m.auth = Auth{
 		AuthType: AuthTypePassword,
 		Password: password,
 	}
+	client, err := m.newSshClient()
+	if err != nil {
+		return fmt.Errorf("failed to authenticate machine '%s' with password: %w", m.Name, err)
+	}
+
+	func() {
+		_ = client.Close()
+	}()
+	return nil
 }
 
-func (m *Machine) WithSshKeyAuth(sshKey []byte) {
-	m.Auth = Auth{
+func (m *Machine) WithSshKeyAuth(sshKey []byte) error {
+	m.auth = Auth{
 		AuthType: AuthTypeSshKey,
 		SshKey:   sshKey,
 	}
+	// Verify authentication immediately upon setting
+	client, err := m.newSshClient() // Create a client to test auth, then it's closed
+	if err != nil {
+		return fmt.Errorf("failed to authenticate machine '%s' with SSH key: %w", m.Name, err)
+	}
+	func() {
+		_ = client.Close()
+	}()
+	return nil
 }
 
 func (m Machine) newSshClient() (*ssh.Client, error) {
@@ -58,7 +76,7 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 		currentUser, userErr := user.Current()
 		if userErr != nil {
 			return nil, fmt.Errorf(
-				"machine '%s': failed to get current user home directory for default known_hosts path: %w",
+				"machine '%s': failed to get user home directory for known_hosts: %w",
 				m.Name,
 				userErr,
 			)
@@ -111,9 +129,9 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 	}
 
 	authMethods := []ssh.AuthMethod{}
-	switch m.Auth.AuthType {
+	switch m.auth.AuthType {
 	case AuthTypePassword:
-		authMethods = append(authMethods, ssh.Password(m.Auth.Password))
+		authMethods = append(authMethods, ssh.Password(m.auth.Password))
 		authMethods = append(
 			authMethods,
 			ssh.KeyboardInteractive(
@@ -122,7 +140,7 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 					for i, q := range questions {
 						if (q == "Password:" || q == "password:" || q == fmt.Sprintf("%s@%s's password:", user, m.Host)) &&
 							!echoprompts[i] {
-							answers[i] = m.Auth.Password
+							answers[i] = m.auth.Password
 						} else {
 							return nil, fmt.Errorf("unsupported keyboard-interactive question: %s", q)
 						}
@@ -132,10 +150,10 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 			),
 		)
 	case AuthTypeSshKey:
-		signer, err := ssh.ParsePrivateKey(m.Auth.SshKey)
+		signer, err := ssh.ParsePrivateKey(m.auth.SshKey)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"machine '%s': failed to parse SSH key. %w",
+				"machine '%s': failed to parse SSH key: %w",
 				m.Name,
 				err,
 			)
@@ -151,8 +169,9 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"machine '%s': failed to connect, error : %w",
+			"machine '%s': failed to connect to %s: %w",
 			m.Name,
+			addr,
 			err,
 		)
 	}
@@ -160,15 +179,22 @@ func (m Machine) newSshClient() (*ssh.Client, error) {
 }
 
 func (m Machine) Run(command string) (Output, error) {
+	if m.auth.AuthType == 0 && m.auth.Password == "" && len(m.auth.SshKey) == 0 {
+		return Output{
+				MachineName: m.Name,
+			}, fmt.Errorf(
+				"machine '%s': authentication not set",
+				m.Name,
+			)
+	}
+
 	client, err := m.newSshClient()
 	if err != nil {
 		return Output{
 			MachineName: m.Name,
 		}, err
 	}
-	defer func() {
-		_ = client.Close()
-	}()
+	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {

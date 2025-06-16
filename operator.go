@@ -22,8 +22,18 @@ type Operator struct {
 
 func New(addToKnownHosts bool) Operator {
 	var defaultKnownHostsPath string
-	currentUser, _ := user.Current()
-	defaultKnownHostsPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
+	currentUser, err := user.Current()
+	if err != nil {
+		defaultKnownHostsPath = ".ssh/known_hosts"
+		fmt.Fprintf(
+			os.Stderr,
+			"WARNING: Could not determine user home directory for default known_hosts path, using '%s'. Err: %v\n",
+			defaultKnownHostsPath,
+			err,
+		)
+	} else {
+		defaultKnownHostsPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
+	}
 
 	op := Operator{
 		Machines:        []Machine{},
@@ -51,7 +61,6 @@ func GetKeyFromFile(path string) ([]byte, error) {
 func (op *Operator) NewMachine(
 	machineName, username, host string,
 	port int,
-	auth Auth,
 ) (Machine, error) {
 	for _, m := range op.Machines {
 		if m.Name == machineName {
@@ -71,22 +80,10 @@ func (op *Operator) NewMachine(
 		Username:        username,
 		Host:            host,
 		Port:            port,
-		Auth:            auth,
+		auth:            Auth{},
 		KnownHostsPath:  op.KnownHostsPath,
 		AddToKnownHosts: op.AddToKnownHosts,
 	}
-
-	client, err := machine.newSshClient()
-	if err != nil {
-		return Machine{}, fmt.Errorf(
-			"initial connection and authentication failed for %w",
-			err,
-		)
-	}
-
-	defer func() {
-		_ = client.Close()
-	}()
 
 	op.Machines = append(op.Machines, machine)
 	return machine, nil
