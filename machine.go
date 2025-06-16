@@ -2,6 +2,7 @@ package opsme
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -26,13 +27,13 @@ type Auth struct {
 }
 
 type Machine struct {
-	Name           string
-	Username       string
-	Host           string
-	Port           int
-	HostKey        string
-	Auth           Auth
-	KnownHostsPath string
+	Name            string
+	Username        string
+	Host            string
+	Port            int
+	Auth            Auth
+	KnownHostsPath  string
+	AddToKnownHosts bool
 }
 
 func (m *Machine) WithPasswordAuth(password string) {
@@ -49,39 +50,55 @@ func (m *Machine) WithSshKeyAuth(sshKey string) {
 	}
 }
 
-func (m Machine) Run(command string) (Output, error) {
+func (m Machine) newSSHClient() (*ssh.Client, error) {
 	var hostKeyCallback ssh.HostKeyCallback
-	var err error
 
-	if m.HostKey != "" {
-		var parsedKey ssh.PublicKey
-		parsedKey, err = ssh.ParsePublicKey([]byte(m.HostKey))
-		if err != nil {
-			return Output{}, fmt.Errorf(
-				"machine '%s': invalid explicit HostKey provided: %w",
+	lookupPath := m.KnownHostsPath
+	if lookupPath == "" {
+		currentUser, userErr := user.Current()
+		if userErr != nil {
+			return nil, fmt.Errorf(
+				"machine '%s': failed to get current user home directory for default known_hosts path: %w",
 				m.Name,
-				err,
+				userErr,
 			)
 		}
-		hostKeyCallback = ssh.FixedHostKey(parsedKey)
-	} else {
-		lookupPath := m.KnownHostsPath
-		if lookupPath == "" {
-			currentUser, userErr := user.Current()
-			if userErr != nil {
-				return Output{}, fmt.Errorf("machine '%s': failed to get current user home directory for default known_hosts path: %w", m.Name, userErr)
+		lookupPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
+	}
+
+	knownHostsChecker, _ := knownhosts.New(lookupPath)
+
+	hostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := knownHostsChecker(hostname, remote, key)
+
+		if _, ok := err.(*knownhosts.KeyError); ok {
+			if m.AddToKnownHosts {
+				f, openErr := os.OpenFile(lookupPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+				if openErr != nil {
+					return fmt.Errorf(
+						"machine '%s': failed to open known_hosts file '%s' for appending: %w",
+						m.Name,
+						lookupPath,
+						openErr,
+					)
+				}
+				defer f.Close()
+
+				hostEntry := knownhosts.Line([]string{hostname}, key)
+				if _, writeErr := f.WriteString(hostEntry + "\n"); writeErr != nil {
+					return fmt.Errorf(
+						"machine '%s': failed to write host key to known_hosts file '%s': %w",
+						m.Name,
+						lookupPath,
+						writeErr,
+					)
+				}
+				return nil
+			} else {
+				return fmt.Errorf("machine '%s': host key for '%s' not found in known_hosts '%s' and auto-adding is disabled. Original error: %w", m.Name, hostname, lookupPath, err)
 			}
-			lookupPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
 		}
-
-		if _, statErr := os.Stat(lookupPath); os.IsNotExist(statErr) {
-			return Output{}, fmt.Errorf("machine '%s': no explicit host key provided and known_hosts file (%s) not found. Host key enforcement requires a known key or a valid known_hosts file.", m.Name, lookupPath)
-		}
-
-		hostKeyCallback, err = knownhosts.New(lookupPath)
-		if err != nil {
-			return Output{}, fmt.Errorf("machine '%s': failed to load known_hosts file %s: %w", m.Name, lookupPath, err)
-		}
+		return err
 	}
 
 	config := &ssh.ClientConfig{
@@ -91,7 +108,6 @@ func (m Machine) Run(command string) (Output, error) {
 	}
 
 	authMethods := []ssh.AuthMethod{}
-
 	switch m.Auth.AuthType {
 	case AuthTypePassword:
 		authMethods = append(authMethods, ssh.Password(m.Auth.Password))
@@ -112,23 +128,18 @@ func (m Machine) Run(command string) (Output, error) {
 				},
 			),
 		)
-
 	case AuthTypeSshKey:
 		signer, err := ssh.ParsePrivateKey([]byte(m.Auth.SshKey))
 		if err != nil {
-			return Output{
-					MachineName: m.Name,
-				}, fmt.Errorf(
-					"machine '%s': failed to parse SSH key: %w",
-					m.Name,
-					err,
-				)
+			return nil, fmt.Errorf(
+				"machine '%s': failed to parse SSH key: %w",
+				m.Name,
+				err,
+			)
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	default:
-		return Output{
-			MachineName: m.Name,
-		}, fmt.Errorf("machine '%s': authentication type not set or unsupported", m.Name)
+		return nil, fmt.Errorf("machine '%s': authentication type not set or unsupported", m.Name)
 	}
 
 	config.Auth = authMethods
@@ -136,16 +147,23 @@ func (m Machine) Run(command string) (Output, error) {
 	addr := m.Host + ":" + strconv.Itoa(m.Port)
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
-		return Output{
-				MachineName: m.Name,
-			}, fmt.Errorf(
-				"machine '%s': failed to connect to %s: %w",
-				m.Name,
-				addr,
-				err,
-			)
+		return nil, fmt.Errorf(
+			"machine '%s': failed to connect to %s: %w",
+			m.Name,
+			addr,
+			err,
+		)
 	}
+	return client, nil
+}
 
+func (m Machine) Run(command string) (Output, error) {
+	client, err := m.newSSHClient()
+	if err != nil {
+		return Output{
+			MachineName: m.Name,
+		}, err
+	}
 	defer func() {
 		_ = client.Close()
 	}()
