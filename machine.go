@@ -23,7 +23,7 @@ const (
 type Auth struct {
 	AuthType AuthType
 	Password string
-	SshKey   string
+	SshKey   []byte
 }
 
 type Machine struct {
@@ -43,14 +43,14 @@ func (m *Machine) WithPasswordAuth(password string) {
 	}
 }
 
-func (m *Machine) WithSshKeyAuth(sshKey string) {
+func (m *Machine) WithSshKeyAuth(sshKey []byte) {
 	m.Auth = Auth{
 		AuthType: AuthTypeSshKey,
 		SshKey:   sshKey,
 	}
 }
 
-func (m Machine) newSSHClient() (*ssh.Client, error) {
+func (m Machine) newSshClient() (*ssh.Client, error) {
 	var hostKeyCallback ssh.HostKeyCallback
 
 	lookupPath := m.KnownHostsPath
@@ -132,7 +132,7 @@ func (m Machine) newSSHClient() (*ssh.Client, error) {
 			),
 		)
 	case AuthTypeSshKey:
-		signer, err := ssh.ParsePrivateKey([]byte(m.Auth.SshKey))
+		signer, err := ssh.ParsePrivateKey(m.Auth.SshKey)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"machine '%s': failed to parse SSH key. %w",
@@ -160,7 +160,7 @@ func (m Machine) newSSHClient() (*ssh.Client, error) {
 }
 
 func (m Machine) Run(command string) (Output, error) {
-	client, err := m.newSSHClient()
+	client, err := m.newSshClient()
 	if err != nil {
 		return Output{
 			MachineName: m.Name,

@@ -3,6 +3,7 @@ package opsme
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/user"
 	"path/filepath"
 	"sync"
@@ -30,6 +31,21 @@ func New(addToKnownHosts bool) Operator {
 		KnownHostsPath:  defaultKnownHostsPath,
 	}
 	return op
+}
+
+func GetKeyFromFile(path string) ([]byte, error) {
+	if path == "" {
+		return nil, errors.New("path cannot be empty")
+	}
+
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read key file at %s: %w", path, err)
+	}
+	if len(key) == 0 {
+		return nil, errors.New("key file is empty")
+	}
+	return key, nil
 }
 
 func (op *Operator) NewMachine(
@@ -60,7 +76,7 @@ func (op *Operator) NewMachine(
 		AddToKnownHosts: op.AddToKnownHosts,
 	}
 
-	client, err := machine.newSSHClient()
+	client, err := machine.newSshClient()
 	if err != nil {
 		return Machine{}, fmt.Errorf(
 			"initial connection and authentication failed for %w",
