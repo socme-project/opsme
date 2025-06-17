@@ -1,12 +1,14 @@
 package opsme
 
+// TODO: Ask gemini to write docs before func
+
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/user"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Output struct {
@@ -15,74 +17,63 @@ type Output struct {
 }
 
 type Operator struct {
-	Machines        []Machine
+	Machines        []*Machine
 	AddToKnownHosts bool
 	KnownHostsPath  string
+	Timeout         time.Duration
 }
 
-func New(addToKnownHosts bool) Operator {
+func New(addToKnownHosts bool, timeout time.Duration) (Operator, error) {
 	var defaultKnownHostsPath string
 	currentUser, err := user.Current()
 	if err != nil {
-		defaultKnownHostsPath = ".ssh/known_hosts"
-		fmt.Fprintf(
-			os.Stderr,
-			"WARNING: Could not determine user home directory for default known_hosts path, using '%s'. Err: %v\n",
-			defaultKnownHostsPath,
+		return Operator{}, fmt.Errorf(
+			"failed to determine user home directory for default known_hosts path: %w",
 			err,
 		)
-	} else {
-		defaultKnownHostsPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
 	}
+	defaultKnownHostsPath = filepath.Join(currentUser.HomeDir, ".ssh", "known_hosts")
 
 	op := Operator{
-		Machines:        []Machine{},
+		Machines:        []*Machine{},
 		AddToKnownHosts: addToKnownHosts,
 		KnownHostsPath:  defaultKnownHostsPath,
+		Timeout:         timeout * time.Second,
 	}
-	return op
+	return op, nil
 }
 
-func GetKeyFromFile(path string) ([]byte, error) {
-	if path == "" {
-		return nil, errors.New("path cannot be empty")
-	}
-
-	key, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read key file at %s: %w", path, err)
-	}
-	if len(key) == 0 {
-		return nil, errors.New("key file is empty")
-	}
-	return key, nil
+func (op *Operator) WithKnownHostsPath(path string) *Operator {
+	op.KnownHostsPath = path
+	return op
 }
 
 func (op *Operator) NewMachine(
 	machineName, username, host string,
 	port int,
-) (Machine, error) {
+) (*Machine, error) {
 	for _, m := range op.Machines {
 		if m.Name == machineName {
-			return Machine{}, errors.New("machine already exists")
+			return nil, errors.New("machine already exists")
 		}
 	}
 
 	if machineName == "" || username == "" || host == "" {
-		return Machine{}, errors.New("arguments cannot be empty")
+		return nil, errors.New("arguments cannot be empty")
 	}
 	if port <= 0 || port > 65535 {
-		return Machine{}, errors.New("port must be between 1 and 65535")
+		return nil, errors.New("port must be between 1 and 65535")
 	}
 
-	machine := Machine{
+	machine := &Machine{
 		Name:            machineName,
 		Username:        username,
 		Host:            host,
 		Port:            port,
-		auth:            Auth{},
+		auth:            auth{},
 		KnownHostsPath:  op.KnownHostsPath,
 		AddToKnownHosts: op.AddToKnownHosts,
+		Timeout:         op.Timeout,
 	}
 
 	op.Machines = append(op.Machines, machine)
@@ -90,24 +81,18 @@ func (op *Operator) NewMachine(
 }
 
 func (op Operator) Run(command string) (outputs []Output, errs []error) {
-	numMachines := len(op.Machines)
-	outputs = make([]Output, numMachines)
-	errs = make([]error, numMachines)
-
-	var wg sync.WaitGroup
+	wg := sync.WaitGroup{}
+	outputs = make([]Output, len(op.Machines))
+	errs = make([]error, len(op.Machines))
 
 	for i, machine := range op.Machines {
 		wg.Add(1)
 
-		mCopy := machine
-
-		go func(index int, m Machine) {
+		go func(index int, m *Machine) {
 			defer wg.Done()
+			outputs[index], errs[index] = m.Run(command)
+		}(i, machine)
 
-			output, err := m.Run(command)
-			outputs[index] = output
-			errs[index] = err
-		}(i, mCopy)
 	}
 
 	wg.Wait()
