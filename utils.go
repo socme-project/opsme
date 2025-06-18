@@ -25,3 +25,9 @@ func GetKeyFromFile(path string) (key []byte, err error) {
 	}
 	return
 }
+
+// WithKnownHostsPath sets the path for the known_hosts file.
+func (op *Operator) WithKnownHostsPath(path string) *Operator {
+	op.KnownHostsPath = path
+	return op
+}

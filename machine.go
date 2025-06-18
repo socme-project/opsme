@@ -1,6 +1,7 @@
 package opsme
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,19 +12,23 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+// authType represents the type of authentication used for SSH connections.
 type authType int
 
+// Constants for different authentication types.
 const (
 	authTypePassword authType = iota
 	authTypeSSHKey
 )
 
+// auth holds the authentication details for a Machine.
 type auth struct {
 	authType authType
 	password string
 	sshKey   []byte
 }
 
+// Machine holds the details of a remote machine that can be accessed via SSH.
 type Machine struct {
 	Name              string
 	Username          string
@@ -33,9 +38,10 @@ type Machine struct {
 	KnownHostsPath    string
 	AddToKnownHosts   bool
 	Timeout           time.Duration
-	knownHostsChecker ssh.HostKeyCallback // Stored on Machine after initialization
+	knownHostsChecker ssh.HostKeyCallback
 }
 
+// WithPasswordAuth sets the authentication method to password-based for the Machine and takes a password as input.
 func (m *Machine) WithPasswordAuth(password string) error {
 	m.auth = auth{
 		authType: authTypePassword,
@@ -50,6 +56,7 @@ func (m *Machine) WithPasswordAuth(password string) error {
 	return err
 }
 
+// WithSSHKeyAuth sets the authentication method to SSH key-based for the Machine and takes the private key as input.
 func (m *Machine) WithSSHKeyAuth(sshKey []byte) error {
 	m.auth = auth{
 		authType: authTypeSSHKey,
@@ -64,75 +71,7 @@ func (m *Machine) WithSSHKeyAuth(sshKey []byte) error {
 	return err
 }
 
-// hostKeyCallbackMethod handles host key verification.
-// If AddToKnownHosts is true and the key is not in known_hosts, it attempts to add it.
-func (m *Machine) hostKeyCallbackMethod(
-	hostname string,
-	remote net.Addr,
-	key ssh.PublicKey,
-) error {
-	err := m.knownHostsChecker(hostname, remote, key)
-
-	// TODO: Check the error
-	if err == nil {
-		return nil
-	}
-
-	if m.AddToKnownHosts {
-		f, err := os.OpenFile(m.KnownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			return fmt.Errorf(
-				"machine '%s': failed to open known_hosts file '%s' for appending: %w",
-				m.Name,
-				m.KnownHostsPath,
-				err,
-			)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-
-		// Format the host entry and write it.
-		hostEntry := knownhosts.Line([]string{hostname}, key)
-		if _, err := f.WriteString(hostEntry + "\n"); err != nil {
-			return fmt.Errorf(
-				"machine '%s': failed to write host key to known_hosts file '%s': %w",
-				m.Name,
-				m.KnownHostsPath,
-				err,
-			)
-		}
-		// Key successfully added, so the connection can now proceed.
-		return nil
-	}
-
-	return fmt.Errorf(
-		"machine '%s': host key validation failed for '%s' in known_hosts '%s'. Auto-adding is disabled. Original error: %w",
-		m.Name,
-		hostname,
-		m.KnownHostsPath,
-		err,
-	)
-}
-
-// keyboardInteractiveMethod handles responding to keyboard-interactive prompts (e.g., for passwords).
-func (m *Machine) keyboardInteractiveMethod(
-	user, instruction string,
-	questions []string,
-	echoprompts []bool,
-) ([]string, error) {
-	answers := make([]string, len(questions))
-	for i, q := range questions {
-		if (q == "Password:" || q == "password:" || q == fmt.Sprintf("%s@%s's password:", user, m.Host)) &&
-			!echoprompts[i] {
-			answers[i] = m.auth.password
-		} else {
-			return nil, fmt.Errorf("unsupported keyboard-interactive question: %s", q)
-		}
-	}
-	return answers, nil
-}
-
+// newSSHClient creates a new SSH client for the Machine.
 func (m *Machine) newSSHClient() (*ssh.Client, error) {
 	if m.KnownHostsPath == "" {
 		return nil, fmt.Errorf(
@@ -141,7 +80,6 @@ func (m *Machine) newSSHClient() (*ssh.Client, error) {
 		)
 	}
 
-	// Initialize knownHostsChecker directly on the Machine instance
 	var err error
 	m.knownHostsChecker, err = knownhosts.New(m.KnownHostsPath)
 	if err != nil {
@@ -155,7 +93,7 @@ func (m *Machine) newSSHClient() (*ssh.Client, error) {
 
 	config := &ssh.ClientConfig{
 		User:            m.Username,
-		HostKeyCallback: m.hostKeyCallbackMethod, // Refer to the method directly
+		HostKeyCallback: m.hostKeyCallbackMethod,
 		Timeout:         m.Timeout,
 	}
 
@@ -168,7 +106,7 @@ func (m *Machine) newSSHClient() (*ssh.Client, error) {
 		)
 		config.Auth = append(
 			config.Auth,
-			ssh.KeyboardInteractive(m.keyboardInteractiveMethod), // Refer to the method directly
+			ssh.KeyboardInteractive(m.keyboardInteractiveMethod),
 		)
 	case authTypeSSHKey:
 		signer, err := ssh.ParsePrivateKey(m.auth.sshKey)
@@ -197,6 +135,7 @@ func (m *Machine) newSSHClient() (*ssh.Client, error) {
 	return client, nil
 }
 
+// Run executes a command on the Machine via SSH and returns the output.
 func (m *Machine) Run(command string) (Output, error) {
 	if m.auth.authType == 0 && m.auth.password == "" &&
 		len(m.auth.sshKey) == 0 {
@@ -250,4 +189,91 @@ func (m *Machine) Run(command string) (Output, error) {
 		MachineName: m.Name,
 		Output:      string(outputBytes),
 	}, nil
+}
+
+// hostKeyCallbackMethod handles host key verification.
+// If AddToKnownHosts is true and the key is not in known_hosts, it attempts to add it.
+func (m *Machine) hostKeyCallbackMethod(
+	hostname string,
+	remote net.Addr,
+	key ssh.PublicKey,
+) error {
+	err := m.knownHostsChecker(hostname, remote, key)
+	if err == nil {
+		return nil
+	}
+
+	var keyError *knownhosts.KeyError
+	if !errors.As(err, &keyError) {
+		return fmt.Errorf(
+			"machine '%s': failed to check known_hosts file '%s': %w",
+			m.Name,
+			m.KnownHostsPath,
+			err,
+		)
+	}
+
+	if len(keyError.Want) > 0 {
+		return fmt.Errorf(
+			"machine '%s': @@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@\n"+
+				"IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY (man-in-the-middle attack)!\n"+
+				"The key for host '%s' in '%s' has changed. The new key's fingerprint is %s",
+			m.Name,
+			hostname,
+			m.KnownHostsPath,
+			ssh.FingerprintSHA256(key),
+		)
+	}
+
+	if !m.AddToKnownHosts {
+		return fmt.Errorf(
+			"machine '%s': host key for '%s' is not trusted. Auto-adding is disabled",
+			m.Name,
+			hostname,
+		)
+	}
+
+	f, err := os.OpenFile(m.KnownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf(
+			"machine '%s': failed to open known_hosts file '%s' for appending: %w",
+			m.Name,
+			m.KnownHostsPath,
+			err,
+		)
+	}
+
+	defer func() {
+		_ = f.Close()
+	}()
+
+	hostEntry := knownhosts.Line([]string{hostname}, key)
+	if _, err := f.WriteString(hostEntry + "\n"); err != nil {
+		return fmt.Errorf(
+			"machine '%s': failed to write host key to known_hosts file '%s': %w",
+			m.Name,
+			m.KnownHostsPath,
+			err,
+		)
+	}
+
+	return nil
+}
+
+// keyboardInteractiveMethod handles responding to keyboard-interactive prompts for authentication.
+func (m *Machine) keyboardInteractiveMethod(
+	user, instruction string,
+	questions []string,
+	echoprompts []bool,
+) ([]string, error) {
+	answers := make([]string, len(questions))
+	for i, q := range questions {
+		if (q == "Password:" || q == "password:" || q == fmt.Sprintf("%s@%s's password:", user, m.Host)) &&
+			!echoprompts[i] {
+			answers[i] = m.auth.password
+		} else {
+			return nil, fmt.Errorf("unsupported keyboard-interactive question: %s", q)
+		}
+	}
+	return answers, nil
 }

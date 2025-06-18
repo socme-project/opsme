@@ -1,7 +1,5 @@
 package opsme
 
-// TODO: Ask gemini to write docs before func
-
 import (
 	"errors"
 	"fmt"
@@ -11,11 +9,13 @@ import (
 	"time"
 )
 
+// Output represents the output of a command executed on a machine.
 type Output struct {
 	MachineName string
 	Output      string
 }
 
+// Operator manages multiple machines and provides methods to run commands on them.
 type Operator struct {
 	Machines        []*Machine
 	AddToKnownHosts bool
@@ -23,6 +23,7 @@ type Operator struct {
 	Timeout         time.Duration
 }
 
+// New initializes a new Operator instance with the option to add to known_hosts and sets a timeout for operations.
 func New(addToKnownHosts bool, timeout time.Duration) (Operator, error) {
 	var defaultKnownHostsPath string
 	currentUser, err := user.Current()
@@ -43,11 +44,7 @@ func New(addToKnownHosts bool, timeout time.Duration) (Operator, error) {
 	return op, nil
 }
 
-func (op *Operator) WithKnownHostsPath(path string) *Operator {
-	op.KnownHostsPath = path
-	return op
-}
-
+// NewMachine creates a new Machine instance with the specified parameters.
 func (op *Operator) NewMachine(
 	machineName, username, host string,
 	port int,
@@ -80,6 +77,7 @@ func (op *Operator) NewMachine(
 	return machine, nil
 }
 
+// Run executes a command on all machines managed by the Operator concurrently.
 func (op Operator) Run(command string) (outputs []Output, errs []error) {
 	wg := sync.WaitGroup{}
 	outputs = make([]Output, len(op.Machines))
