@@ -1,6 +1,8 @@
 # OPSme
 
-OPSme is a golang library that provides a simple way to manage multiple machines via SSH. It allows you to execute commands on different machines concurrently, making it easier to manage large infrastructures.
+OPSme is a golang library that provides a simple way to manage multiple machines
+via SSH. It allows you to execute commands on different machines concurrently,
+making it easier to manage large infrastructures.
 
 ## Installation
 
@@ -18,7 +20,8 @@ To use OPSme, you need to import the package in your Go code:
 import "github.com/socme-project/opsme"
 ```
 
-You can then create a new instance of OPSme and use it to execute commands on multiple machines. Here is a simple example:
+You can then create a new instance of OPSme and use it to execute commands on
+multiple machines. Here is a simple example:
 
 ```go
 func main() {
@@ -64,23 +67,23 @@ func main() {
 
  result, _ = m2.Run("pwd")
  fmt.Printf("Output from %s ('pwd'): %s\n", m2.Name, strings.TrimSpace(result.Output))
+}
 ```
 
 You can also run commands concurrently on multiple machines:
 
 ```go
- fmt.Println("\nRunning 'id' on all machines...")
- results, errors := operator.Run("id")
- for i, result := range results {
-  if errors[i] != nil {
-   log.Printf("Error 'id' on %s: %v\n", operator.Machines[i].Name, errors[i])
-   continue
-  }
-  fmt.Printf(
-   "Output from %s ('id'): %s\n",
-   result.MachineName,
-   strings.TrimSpace(result.Output),
-  )
+fmt.Println("\nRunning 'id' on all machines...")
+results, errors := operator.Run("id")
+for i, result := range results {
+ if errors[i] != nil {
+  log.Printf("Error 'id' on %s: %v\n", operator.Machines[i].Name, errors[i])
+  continue
  }
+ fmt.Printf(
+  "Output from %s ('id'): %s\n",
+  result.MachineName,
+  strings.TrimSpace(result.Output),
+ )
 }
 ```
